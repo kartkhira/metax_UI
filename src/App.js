@@ -5,41 +5,59 @@ import Token from "./Contracts/Token.json";
 
 import { ethers } from "ethers";
 import {config} from "./config"
-import { Biconomy } from "@biconomy/mexa";
+
 
 export default function App() {
 
+  const [currentAccount, setCurrentAccount] = useState("");
   const [factoryContract, setFactoryContract] = useState();
+  const [tokenContract, setTokenContract] = useState();
   const [token_, setToken] =  useState("");
   const [amount_ , setAmount] = useState(0);
   const [ctoken_, setCToken] =  useState("");
   const [camount_ , setCAmount] = useState(0);
-  var dict = {'USDC': '0x005A32A2ba4516cFD6e999726262a8A1e2A8147b',
+  var dict = {'USDC': config.tokenAddress,
               'USDT': '0x509Ee0d083DdF8AC028f2a56731412edD63223B9'};
 
 
-  const biconomy = new Biconomy(window.ethereum, {
-    apiKey: config.apikey,
-    debug: true,
-    contractAddresses: [config.factoryAddress], // list of contract address you want to enable gasless on
-  });
-
   const handleTokenChange= e =>{
     setToken(e.target.value)
-    
   }
 
   const handleAmountChange = e =>{
     setAmount(e.target.value)
   }
 
-  const handleClaimTokenChange= e =>{
+  const handleClaimTokenChange = e =>{
     setCToken(e.target.value)
     
   }
 
   const handleClaimAmountChange = e =>{
     setCAmount(e.target.value)
+  }
+
+  const setContractInstances = async() =>{
+
+    const provider = new ethers.providers.Web3Provider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    const signer = provider.getSigner();
+
+    const contract = new ethers.Contract(
+      config.factoryAddress,
+      Factory,
+      signer
+    );
+
+    setFactoryContract(contract);
+
+    const tContract = new ethers.Contract(
+      config.tokenAddress,
+      Token,
+      signer
+    )  
+
+    setTokenContract(tContract);
   }
 
   /****************************************************************************************** */
@@ -54,9 +72,10 @@ export default function App() {
       const accounts = await window.ethereum.request({
         method: "eth_requestAccounts",
       });
-
+      setCurrentAccount(accounts[0]);
+      
       console.log("Connected", accounts[0]);
-      await biconomy.init();
+
       
     } catch (error) {
       console.log(error);
@@ -69,55 +88,38 @@ export default function App() {
    * API to deploy the Wallet from factory 
    */
   const deployNewWallet = async () => {
-    let factoryAddress = config.factoryAddress;
-
     if (!window.ethereum) {
       alert("Please install MetaMask!");
       return;
     }
-
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-    const signer = provider.getSigner();
-    const contract = new ethers.Contract(
-      factoryAddress,
-      Factory.abi,
-      signer
-    );
-
-    const deployed = await contract.createTLSCW();
+    
+    const deployed = await factoryContract.createTLSCW({gasLimit : 640000});
+    await deployed.wait();
     console.log(deployed);
   };
 
   const isWalletDeployed = async() =>{
-
-    let factoryAddress = config.factoryAddress;
     if (!window.ethereum) {
       alert("Please install MetaMask!");
       return;
     }
-
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-    const signer = provider.getSigner();
-    const contract = new ethers.Contract(
-      factoryAddress,
-      Factory.abi,
-      signer
-    );
-    setFactoryContract(contract);
-    debugger;
-    const walletAddress =  await contract.getWallet();
+    let  result ;
+    const walletAddress = await factoryContract.registry(currentAccount);
     console.log(walletAddress);
-    debugger;
-    if(walletAddress !== 0){ 
-      return true;
+    if(walletAddress != '0x0000000000000000000000000000000000000000'){ 
+      result =  true ;
     }
-    else return false;
+    else result = false;
+    console.log('result : ' + result);
+    return result;
   }
  /************************************Deposit ************************************* */
-  const handleEthDeposit =  async() =>{
-    if(isWalletDeployed()){
-      const walletAddress = await factoryContract.getWallet();
 
+  const handleEthDeposit =  async() =>{
+    console.log('In Eth Deposit')
+    if(await isWalletDeployed()){
+      console.log('Wallet is already deployed');
+      const walletAddress = await factoryContract.registry(currentAccount);
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const signer = provider.getSigner();
 
@@ -125,15 +127,16 @@ export default function App() {
         to: walletAddress,
         value : ethers.utils.parseEther(amount_)
       });
-
+      await tx.wait();
       console.log("tx", tx);
 
     }
     else{
+      console.log('Wallet not deployed. Deploying the wallet');
       await deployNewWallet();
 
-      const walletAddress = await factoryContract.getWallet();
-
+      const walletAddress = await factoryContract.registry(currentAccount);
+      console.log(walletAddress);
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const signer = provider.getSigner();
 
@@ -141,58 +144,66 @@ export default function App() {
         to: walletAddress,
         value : ethers.utils.parseEther(amount_)
       });
+      await tx.wait();
 
       console.log("tx", tx);
-
 
     }
   }
 
-  const handleTokenDeposit =  async() =>{
-  if(isWalletDeployed()){
-    const walletAddress = await factoryContract.getWallet();
+  const handleTokenDeposit =  async(e) =>{
+    e.preventDefault();
+    if(isWalletDeployed()){  
+      
+      const walletAddress = await factoryContract.registry(currentAccount);
 
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-    const signer = provider.getSigner();
-    const tokenContract =  new ethers.Contract(
-      dict[token_],
-      Token.abi,
-      signer
-    );
-    debugger;
-    const approve = await tokenContract.approve(walletAddress, amount_);
-    console.log(approve);
+      const approve = await tokenContract.approve(walletAddress, amount_);
+      await approve.await();
+      console.log(approve);
 
-    const contract = new ethers.Contract(
-      walletAddress,
-      Wallet.abi,
-      signer
-    );
-    debugger;
-    const deposit = await contract.deposit(dict[token_], amount_);
-    console.log(deposit);
-    debugger;
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer = provider.getSigner();
+      const contract = new ethers.Contract(
+        walletAddress,
+        Wallet.abi,
+        signer
+      );
+      
+      const deposit = await contract.deposit(dict[token_], amount_);
+      await deposit.wait();
+      console.log(deposit);
+      
+    }
+    else{
+
+      await deployNewWallet();
+      const walletAddress = await factoryContract.registry(currentAccount);
+
+      const approve = await tokenContract.approve(walletAddress, amount_);
+      await approve.await();
+      console.log(approve);
+
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer = provider.getSigner();
+
+      const contract = new ethers.Contract(
+        walletAddress,
+        Wallet.abi,
+        signer
+      );
+      
+      const deposit = await contract.deposit(dict[token_], amount_);
+      await deposit.wait();
+      console.log(deposit);
+
+    }
   }
-  else{
 
-    await deployNewWallet();
-    const walletAddress = await factoryContract.getWallet();
-
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-    const signer = provider.getSigner();
-    const contract = new ethers.Contract(
-      walletAddress,
-      Wallet.abi,
-      signer
-    );
-
-    const deposit = await contract.deposit(dict[token_], amount_);
-    console.log(deposit);
-
-  }
-  }
-
-  const handleDeposit = async() =>{
+  const handleDeposit = async(e) =>{
+    e.preventDefault();
+    await setContractInstances();
     if(token_ === 'ETH'){
       await handleEthDeposit();
     }
@@ -206,16 +217,8 @@ export default function App() {
 const handleEthWithdraw = async() =>{
   if(isWalletDeployed()){
 
-    let factoryAddress = config.factoryAddress;
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-
-    const contract = new ethers.Contract(
-      factoryAddress,
-      Factory.abi,
-      biconomy.ethersProvider
-    );
-
-    const withdraw = await contract.claimEthers(ethers.utils.parseEther(amount_));
+    const withdraw = await factoryContract.claimEthers(ethers.utils.parseEther(amount_));
+    await withdraw.wait();
     console.log( ethers.utils.parseEther(amount_));
     console.log(withdraw)
 
@@ -228,16 +231,8 @@ const handleEthWithdraw = async() =>{
 const handleTokenWithdraw = async() =>{
   if(isWalletDeployed()){
 
-    let factoryAddress = config.factoryAddress;
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-
-    const contract = new ethers.Contract(
-      factoryAddress,
-      Factory.abi,
-      biconomy.ethersProvider
-    );
-
-    const withdraw = await contract.claimTokens(dict[token_], amount_);
+    const withdraw = await factoryContract.claimTokens(dict[token_], amount_);
+    await withdraw.wait();
     console.log( ethers.utils.parseEther(amount_));
     console.log(withdraw)
 
@@ -246,8 +241,11 @@ const handleTokenWithdraw = async() =>{
     console.log("Please Deposit First")
   }
 }
-const handleWithdraw =async() =>{
 
+const handleWithdraw =async(e) =>{
+
+    e.preventDefault();
+    await setContractInstances();
     if(token_ === 'ETH'){
       await handleEthWithdraw();
     }
@@ -257,7 +255,7 @@ const handleWithdraw =async() =>{
 }
   useEffect(() => {
     connectWallet();
-  }, []);
+  }, [window.ethereum]);
 
   return (
       <>
@@ -301,6 +299,8 @@ const handleWithdraw =async() =>{
           onChange={handleClaimAmountChange} />
         <input type="submit" />
       </form>
+      <h1> Token : {token_}</h1>
+      <h1> Amount : {amount_}</h1>
       </>
   );
 }
