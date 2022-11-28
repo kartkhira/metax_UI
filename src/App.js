@@ -5,19 +5,22 @@ import Token from "./Contracts/Token.json";
 
 import { ethers } from "ethers";
 import {config} from "./config"
-
+import { Biconomy } from "@biconomy/mexa";
 
 export default function App() {
 
   const [currentAccount, setCurrentAccount] = useState("");
   const [factoryContract, setFactoryContract] = useState();
   const [tokenContract, setTokenContract] = useState();
+  const [bicoContract, setBicoContract] = useState();
   const [token_, setToken] =  useState("");
   const [amount_ , setAmount] = useState(0);
   const [ctoken_, setCToken] =  useState("");
   const [camount_ , setCAmount] = useState(0);
+
   var dict = {'USDC': config.tokenAddress,
               'USDT': '0x509Ee0d083DdF8AC028f2a56731412edD63223B9'};
+
 
 
   const handleTokenChange= e =>{
@@ -58,6 +61,25 @@ export default function App() {
     )  
 
     setTokenContract(tContract);
+
+    const biconomy = new Biconomy(window.ethereum, {
+      apiKey: config.apikey,
+      debug: true,
+      contractAddresses: [config.factoryAddress] 
+    });
+    console.log(biconomy);  
+    console.log('Biconomy instantiated');
+
+    const Contract = new ethers.Contract(
+    config.factoryAddress,
+    Factory,
+    biconomy.ethersProvider
+    );
+
+    setBicoContract(Contract);
+
+    await biconomy.init();
+    
   }
 
   /****************************************************************************************** */
@@ -93,7 +115,7 @@ export default function App() {
       return;
     }
     
-    const deployed = await factoryContract.createTLSCW({gasLimit : 640000});
+    const deployed = await factoryContract.createTLSCW();
     await deployed.wait();
     console.log(deployed);
   };
@@ -104,13 +126,13 @@ export default function App() {
       return;
     }
     let  result ;
+
     const walletAddress = await factoryContract.registry(currentAccount);
     console.log(walletAddress);
     if(walletAddress != '0x0000000000000000000000000000000000000000'){ 
       result =  true ;
     }
     else result = false;
-    console.log('result : ' + result);
     return result;
   }
  /************************************Deposit ************************************* */
@@ -118,7 +140,7 @@ export default function App() {
   const handleEthDeposit =  async() =>{
     console.log('In Eth Deposit')
     if(await isWalletDeployed()){
-      console.log('Wallet is already deployed');
+      
       const walletAddress = await factoryContract.registry(currentAccount);
       const provider = new ethers.providers.Web3Provider(window.ethereum);
       const signer = provider.getSigner();
@@ -151,17 +173,17 @@ export default function App() {
     }
   }
 
-  const handleTokenDeposit =  async(e) =>{
-    e.preventDefault();
+  const handleTokenDeposit =  async() =>{
     if(isWalletDeployed()){  
       
       const walletAddress = await factoryContract.registry(currentAccount);
 
       const approve = await tokenContract.approve(walletAddress, amount_);
-      await approve.await();
+      await approve.wait();
       console.log(approve);
 
       const provider = new ethers.providers.Web3Provider(window.ethereum);
+      console.log(provider)
       await provider.send("eth_requestAccounts", []);
       const signer = provider.getSigner();
       const contract = new ethers.Contract(
@@ -217,9 +239,9 @@ export default function App() {
 const handleEthWithdraw = async() =>{
   if(isWalletDeployed()){
 
-    const withdraw = await factoryContract.claimEthers(ethers.utils.parseEther(amount_));
+    const withdraw = await bicoContract.claimEthers(ethers.utils.parseEther(camount_));
     await withdraw.wait();
-    console.log( ethers.utils.parseEther(amount_));
+    console.log( ethers.utils.parseEther(camount_));
     console.log(withdraw)
 
   }
@@ -231,9 +253,9 @@ const handleEthWithdraw = async() =>{
 const handleTokenWithdraw = async() =>{
   if(isWalletDeployed()){
 
-    const withdraw = await factoryContract.claimTokens(dict[token_], amount_);
+    const withdraw = await bicoContract.claimTokens(dict[ctoken_], camount_);
     await withdraw.wait();
-    console.log( ethers.utils.parseEther(amount_));
+    console.log( ethers.utils.parseEther(camount_));
     console.log(withdraw)
 
   }
@@ -246,7 +268,7 @@ const handleWithdraw =async(e) =>{
 
     e.preventDefault();
     await setContractInstances();
-    if(token_ === 'ETH'){
+    if(ctoken_ === 'ETH'){
       await handleEthWithdraw();
     }
     else{
@@ -255,7 +277,7 @@ const handleWithdraw =async(e) =>{
 }
   useEffect(() => {
     connectWallet();
-  }, [window.ethereum]);
+  }, []);
 
   return (
       <>
@@ -299,8 +321,10 @@ const handleWithdraw =async(e) =>{
           onChange={handleClaimAmountChange} />
         <input type="submit" />
       </form>
-      <h1> Token : {token_}</h1>
-      <h1> Amount : {amount_}</h1>
+      <h1> DepositToken : {token_}</h1>
+      <h1> Deposit Amount : {amount_}</h1>
+      <h1> ClaimToken : {ctoken_}</h1>
+      <h1> Claim Amount: {camount_}</h1>
       </>
   );
 }
