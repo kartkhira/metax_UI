@@ -19,7 +19,7 @@ export default function App() {
   const [camount_ , setCAmount] = useState(0);
 
   var dict = {'USDC': config.tokenAddress,
-              'USDT': '0x509Ee0d083DdF8AC028f2a56731412edD63223B9'};
+              'USDT': config.tokenAddress};
 
 
 
